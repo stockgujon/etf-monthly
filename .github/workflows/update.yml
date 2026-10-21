@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: '執行模式：probe 只檢查資料來源、不寫檔；normal 正常更新'
+        description: '執行模式：normal 正常更新；probe 只檢查資料來源、不寫檔；rebuild 丟掉現有資料從頭補抓'
         type: choice
-        options: [normal, probe]
+        options: [normal, probe, rebuild]
         default: normal
 
 permissions:
@@ -36,7 +36,7 @@ jobs:
         run: node scripts/update.mjs "${{ github.event.inputs.mode || 'normal' }}"
 
       - name: 存回 repo
-        if: (github.event.inputs.mode || 'normal') == 'normal'
+        if: (github.event.inputs.mode || 'normal') != 'probe'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
