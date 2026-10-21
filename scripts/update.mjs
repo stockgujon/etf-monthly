@@ -177,7 +177,7 @@ async function getJson(label, urls, { headers = {}, method = 'GET', body, valida
 function findTable(json, needles) {
   const tables = Array.isArray(json?.tables) ? json.tables : (Array.isArray(json?.fields) ? [json] : []);
   for (const t of tables) {
-    const fields = (t.fields || []).map((f) => stripHtml(f));
+    const fields = (t.fields || []).map((f) => stripHtml(f).replace(/\s+/g, '')); // 櫃買欄位有「日 期」「收盤 」這種空白
     const idx = needles.map((n) => fields.findIndex((f) => f.includes(n)));
     if (idx.every((i) => i >= 0)) return { title: stripHtml(t.title || json.title || ''), fields, data: t.data || [], idx, date: t.date || json.date || null };
   }
@@ -236,11 +236,40 @@ async function fetchTpexDaily() {
   }
 }
 
+// 上市每日：先讀 OpenAPI（官方，但通常要隔天才有當天資料），
+// 還沒有今天的話再查一次當天的「每日收盤行情」（2026-10-21 使用者同意，每班多 1 個請求）。
+// 兩筆都有就都用（舊的先），暫存區因此兩天都有。OpenAPI 失敗時往前找最近一個交易日。
+async function fetchTwseSnapshots(today) {
+  const snaps = [];
+  let openErr = null;
+  try { snaps.push(await fetchTwseDaily()); } catch (err) { openErr = err; warn(`${err.message}；改用證交所每日收盤行情`); }
+  const have = snaps[0]?.date || '';
+  if (!isWeekend(today) && have < today) {
+    try {
+      const s = await fetchTwseDay(today, { quick: true });
+      if (!s.empty && Object.keys(s.prices).length) { snaps.push(s); log(`上市當天收盤由每日收盤行情補上：${today}，${Object.keys(s.prices).length} 檔`); }
+      else log(`上市每日收盤行情：${today} 還沒有資料（OpenAPI 目前到 ${have || '—'}）`);
+    } catch (err) {
+      log(`上市每日收盤行情（當天）這次沒讀到，沿用 OpenAPI：${err.message}`);
+    }
+  }
+  if (!snaps.length) {
+    for (let i = 0, d = addDays(today, -1); i < 7; i++, d = addDays(d, -1)) {
+      if (isWeekend(d)) continue;
+      const s = await fetchTwseDay(d);
+      if (!s.empty && Object.keys(s.prices).length) { snaps.push(s); log(`上市每日收盤改由每日收盤行情取得：${d}`); break; }
+    }
+    if (!snaps.length) throw openErr || new Error('上市每日收盤：沒有資料');
+  }
+  return snaps.sort((a, b) => a.date.localeCompare(b.date));
+}
+
 // 歷史某一天：上市 MI_INDEX（只取 ETF 表）
-async function fetchTwseDay(iso) {
+async function fetchTwseDay(iso, { quick = false } = {}) {
   const ymd = iso.replace(/-/g, '');
   const j = await getJson(`上市 ${iso} 收盤（MI_INDEX）`, twseUrls(`/rwd/zh/afterTrading/MI_INDEX?date=${ymd}&type=0099P&response=json`), {
     headers: H_TWSE,
+    retryDelays: quick ? [] : RETRY_DELAYS_MS,
     validate: (x) => {
       if (!x || typeof x !== 'object') return '格式不符';
       if (statIsEmpty(x.stat)) return null;
@@ -313,7 +342,7 @@ async function fetchTwseMonth(code, m) {
     },
   });
   if (statIsEmpty(j.stat)) return [];
-  const fields = (j.fields || []).map(stripHtml);
+  const fields = (j.fields || []).map((f) => stripHtml(f).replace(/\s+/g, ''));
   const di = fields.findIndex((f) => f.includes('日期'));
   const ci = fields.findIndex((f) => f.includes('收盤'));
   if (di < 0 || ci < 0) throw new Error(`上市 ${code} ${m}：欄位不符 ${JSON.stringify(fields)}`);
@@ -325,7 +354,11 @@ async function fetchTpexMonth(code, m) {
   const [y, mo] = m.split('-');
   const j = await getJson(`上櫃 ${code} ${m} 日成交`, [`https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock?code=${code}&date=${y}/${mo}/01&response=json`], {
     headers: H_TPEX,
-    validate: (x) => (x && typeof x === 'object' ? null : '格式不符'),
+    validate: (x) => {
+      if (!x || typeof x !== 'object') return '格式不符';
+      if (x.code != null && String(x.code).trim() && String(x.code).trim() !== code) return `回應的代號是 ${x.code}，不是 ${code}（可能讀到快取）`;
+      return null;
+    },
   });
   if (statIsEmpty(j.stat)) return [];
   const t = findTable(j, ['日期', '收盤']);
@@ -353,7 +386,7 @@ async function fetchSplits(fromIso, toIso) {
     validate: (x) => (x && typeof x === 'object' && (statIsOk(x.stat) || statIsEmpty(x.stat)) ? null : `stat=${x?.stat}`),
   });
   if (statIsEmpty(j.stat)) return [];
-  const fields = (j.fields || []).map(stripHtml);
+  const fields = (j.fields || []).map((f) => stripHtml(f).replace(/\s+/g, ''));
   const fi = (n, fb) => { const i = fields.findIndex((f) => f.includes(n)); return i >= 0 ? i : fb; };
   const iDate = fi('恢復買賣日期', 0);
   const iCode = fi('代號', 1);
@@ -789,6 +822,10 @@ async function probe() {
     tpexSample = codes.find((c) => /B$/.test(c)) || codes[0];
     log(`日期 ${s.date}；ETF ${codes.length} 檔（有收盤價 ${Object.keys(s.prices).length}）；例：${codes.slice(0, 5).map((c) => `${c} ${s.names[c]} ${s.prices[c]}`).join('、')}`);
   });
+  await step(`上市當天每日收盤行情（MI_INDEX ${today}）`, async () => {
+    const s = await fetchTwseDay(today, { quick: true });
+    log(s.empty ? `${today} 還沒有資料（盤後才會出現）` : `${today}：${Object.keys(s.prices).length} 檔；0050=${s.prices['0050']}`);
+  });
   await step(`上市 ${pm} 月底（MI_INDEX）`, async () => {
     const s = await findMonthEnd('twse', pm);
     log(s ? `月底 ${s.date}，${Object.keys(s.prices).length} 檔；0050=${s.prices['0050']}，0056=${s.prices['0056']}` : '整個月找不到資料');
@@ -859,15 +896,21 @@ async function main() {
     }
   }
 
-  // 2. 每日收盤（OpenAPI）
+  // 2. 每日收盤：上市 OpenAPI＋當天每日收盤行情（OpenAPI 通常晚一天）；上櫃 OpenAPI，失敗改用每日收盤行情
   const activeCount = (mk) => Object.values(R.etfs).filter((e) => marketKeyOf(e) === mk && !e.delisted && e.last).length;
   let dailyOk = 0;
   const newByMarket = { twse: [], tpex: [] };
   for (const market of ['twse', 'tpex']) {
     try {
-      const snap = market === 'twse' ? await fetchTwseDaily() : await fetchTpexDaily();
-      const res = applyDaily(R, S, market, snap, activeCount(market));
-      if (res.applied) { dailyOk++; newByMarket[market] = res.newCodes.map((c) => ({ code: c, date: snap.date, close: snap.prices[c] })); }
+      const snaps = market === 'twse' ? await fetchTwseSnapshots(today) : [await fetchTpexDaily()];
+      let applied = false;
+      for (const snap of snaps) {
+        const res = applyDaily(R, S, market, snap, activeCount(market));
+        if (!res.applied) continue;
+        applied = true;
+        for (const c of res.newCodes) newByMarket[market].push({ code: c, date: snap.date, close: snap.prices[c] });
+      }
+      if (applied) dailyOk++;
     } catch (err) {
       warn(err.message);
     }
