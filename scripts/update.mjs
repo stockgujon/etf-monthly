@@ -4,6 +4,7 @@
 // 用法：node scripts/update.mjs [normal|probe]
 //   normal：每日更新（第一次執行時會自動補抓 2024/12 起的歷史月底價）
 //   probe ：只把每個資料來源讀一次、印出結果，不寫任何檔案
+//   rebuild：丟掉現有資料，從頭補抓一次（程式邏輯修正後用）
 //
 // 產出：
 //   data/returns.json  網頁讀的資料（月底價、最新價、分割、分類）
@@ -35,6 +36,11 @@ const THEME_CHANGE_RATIO = 0.3;             // 主題檔數一次變動超過三
 const PRICE_MISMATCH = 0.005;               // 兩個來源的收盤價差超過 0.5% 就警告
 const MAX_NEW_PER_RUN = 25;                 // 單次最多查幾檔新掛牌的首日收盤
 const MAX_GAP_FILL_PER_RUN = 15;            // 單次最多補幾檔個別月底價
+const MAX_VERIFY_PER_RUN = 10;              // 單次最多逐日確認幾個「大漲跌」月份
+const CHECK_LOW = -0.4;                     // 單月報酬超出這個範圍就要逐日確認（網頁同一組數字）
+const CHECK_HIGH = 1.0;
+const JUMP_UP = 1.9;                        // 單日漲成 1.9 倍以上或跌到 0.53 倍以下，視為疑似未公告的分割
+const JUMP_DOWN = 0.53;
 const RWD_GAP_MS = Number(process.env.RWD_GAP_MS ?? 1500);
 const RETRY_DELAYS_MS = (process.env.RETRY_DELAYS_MS ?? '2000,6000,15000').split(',').map(Number);
 const FETCH_TIMEOUT_MS = Number(process.env.FETCH_TIMEOUT_MS ?? 45000);
@@ -486,23 +492,24 @@ async function backfillMarket(R, S, market, months) {
     snaps.push({ m, ...snap });
     log(`  ${m} 月底 = ${snap.date}，${Object.keys(snap.prices).length} 檔`);
   }
-  // 寫入月底價；第一次出現在起算點之後的，記為新掛牌
+  // 寫入月底價。「第一次出現在名單上」（不論當天有沒有成交）在起算點之後的，記為新掛牌
   const firstSeen = {};
   for (const s of snaps) {
-    for (const [code, close] of Object.entries(s.prices)) {
-      const e = ensureEtf(R, code, market, s.names[code]);
-      e.me[s.m] = close;
+    for (const [code, name] of Object.entries(s.names)) {
+      ensureEtf(R, code, market, name);
       if (!firstSeen[code]) firstSeen[code] = s.m;
     }
+    for (const [code, close] of Object.entries(s.prices)) R.etfs[code].me[s.m] = close;
     R.months[s.m] = { ...(R.months[s.m] || {}), [market]: { date: s.date, source: 'history' } };
   }
-  // 名稱補齊（有名稱但沒收盤價的也要建檔）
-  for (const s of snaps) for (const [code, name] of Object.entries(s.names)) if (!R.etfs[code]) { ensureEtf(R, code, market, name); firstSeen[code] = firstSeen[code] || s.m; }
 
   // 新掛牌：查掛牌那個月的逐日資料，第一列就是掛牌首日
   const newcomers = Object.entries(firstSeen).filter(([, m]) => m > BASELINE_MONTH);
   log(`  起算點之後新掛牌：${newcomers.length} 檔，逐檔查掛牌首日收盤…`);
   for (const [code, m] of newcomers) await resolveListing(R, market, code, m, null, false);
+
+  // 最後一次「出現在名單上」的日子（沒成交也算，用來判斷下市）
+  for (const s of snaps) for (const code of Object.keys(s.names)) if (R.etfs[code] && (!R.etfs[code].seen || R.etfs[code].seen < s.date)) R.etfs[code].seen = s.date;
 
   // 下市：曾出現、後來的月底快照都沒有了
   const lastSnap = snaps.at(-1);
@@ -514,7 +521,7 @@ async function backfillMarket(R, S, market, months) {
     }
   }
 
-  // 停牌剛好跨月底：前後月都有、中間某月沒有 → 個別補
+  // 月底當天沒有成交（冷門 ETF、停牌）→ 個別補
   await fillGaps(R, market, snaps.map((s) => s.m), Infinity);
 }
 
@@ -567,18 +574,30 @@ async function fillGaps(R, market, monthList, budget) {
   for (const [code, e] of Object.entries(R.etfs)) {
     if (marketKeyOf(e) !== market) continue;
     const have = monthList.filter((m) => e.me[m] != null);
-    if (have.length < 2) continue;
-    const first = have[0];
-    const last = have.at(-1);
+    if (!have.length) continue;
+    // 起點：起算點前就存在的，從起算點開始補；之後掛牌的，從第一個有月底價的月份開始
+    const first = !e.listed ? prevMonth(monthList[0]) : have[0];
+    // 還在掛牌的：補到最後一個月；已下市的：只補中間
+    const last = e.delisted ? have.at(-1) : monthList.at(-1);
     for (const m of monthList) {
-      if (m <= first || m >= last || e.me[m] != null) continue;
+      if (m <= first || m > last || e.me[m] != null) continue;
       if (e.listed && monthKey(e.listed) > m) continue;
-      if (used >= budget) { warn(`個別補月底價已達本次上限，${code} ${m} 留待下次`); return; }
+      if (e.delisted && e.delisted < `${m}-01`) continue;
+      if (used >= budget) { warn(`個別補月底價已達本次上限，${code} ${m} 留待下一班`); return; }
       used++;
       try {
-        const rows = await fetchMonth(market, code, m);
-        if (rows.length) { e.me[m] = rows.at(-1).close; log(`    ${code} ${m} 月底價（停牌跨月）補為 ${rows.at(-1).date} 收盤 ${rows.at(-1).close}`); }
-        else warn(`${code} ${m} 整個月沒有成交，月底價留白`);
+        const endDate = R.months[m]?.[market]?.date;
+        const rows = (await fetchMonth(market, code, m)).filter((r) => !endDate || r.date <= endDate);
+        if (rows.length) { e.me[m] = rows.at(-1).close; log(`    ${code} ${m} 月底當天沒有成交，月底價用 ${rows.at(-1).date} 收盤 ${rows.at(-1).close}`); }
+        else if (e.me[prevMonth(m)] != null) { e.me[m] = e.me[prevMonth(m)]; log(`    ${code} ${m} 整個月沒有成交，月底價沿用上月底 ${e.me[m]}`); }
+        else if (m === BASELINE_MONTH) {
+          // 起算點那個月整月沒成交：往前最多找 6 個月的最後一筆成交
+          let found = null;
+          for (let k = 1, mm = prevMonth(m); k <= 6 && !found; k++, mm = prevMonth(mm)) { const rr = await fetchMonth(market, code, mm); if (rr.length) found = rr.at(-1); }
+          if (found) { e.me[m] = found.close; log(`    ${code} 起算點月整月沒有成交，月底價用 ${found.date} 收盤 ${found.close}`); }
+          else warn(`${code} 起算點前 6 個月都沒有成交，起算點價格留白`);
+        }
+        else warn(`${code} ${m} 整個月沒有成交，也沒有上月底價，留白`);
       } catch (err) { warn(`${code} ${m} 個別補月底價失敗：${err.message}`); }
     }
   }
@@ -610,7 +629,13 @@ function applyDaily(R, S, market, snap, prevActiveCount) {
     if (!R.etfs[code]) newCodes.push(code);
     const e = ensureEtf(R, code, market, snap.names[code]);
     if (!e.last || e.last.date <= snap.date) e.last = { date: snap.date, close };
-    if (e.delisted) { warn(`${code} 原本標為已下市，但 ${snap.date} 又有收盤價，取消下市標記`); e.delisted = null; }
+  }
+  // 名單上有（就算今天沒成交）＝還在掛牌
+  for (const code of Object.keys(snap.names)) {
+    const e = R.etfs[code];
+    if (!e) continue;
+    if (!e.seen || e.seen < snap.date) e.seen = snap.date;
+    if (e.delisted) { log(`  ${code} ${e.name} 還在 ${snap.date} 的名單上，取消下市標記`); e.delisted = null; }
     delete e.delistedHint;
   }
   R.latest[market] = snap.date;
@@ -688,7 +713,7 @@ async function freezeMonth(R, S, market, m, today) {
     if (close == null) close = closeFromBuffer(S, market, code, m, snap.date);
     if (close == null && e.last && monthKey(e.last.date) === m && e.last.date <= snap.date) close = e.last.close;
     if (close != null) { e.me[m] = close; filled++; }
-    else if (!e.delisted && e.me[prevMonth(m)] != null && e.last && e.last.date > snap.date) gaps.push(code);
+    else if (!e.delisted && e.me[prevMonth(m)] != null) gaps.push(code);
   }
   R.months[m] = { ...(R.months[m] || {}), [market]: { date: snap.date, source } };
   delete S.pending[key];
@@ -697,12 +722,67 @@ async function freezeMonth(R, S, market, m, today) {
   for (const code of gaps.slice(0, MAX_GAP_FILL_PER_RUN)) {
     try {
       const rows = (await fetchMonth(market, code, m)).filter((r) => r.date <= snap.date);
-      if (rows.length) { R.etfs[code].me[m] = rows.at(-1).close; log(`    ${code} 月底停牌，${m} 月底價改用 ${rows.at(-1).date} 收盤 ${rows.at(-1).close}`); }
-      else warn(`${code} ${m} 整個月沒有成交，月底價留白`);
+      if (rows.length) { R.etfs[code].me[m] = rows.at(-1).close; log(`    ${code} ${m} 月底當天沒有成交，月底價用 ${rows.at(-1).date} 收盤 ${rows.at(-1).close}`); }
+      else if (R.etfs[code].me[prevMonth(m)] != null) { R.etfs[code].me[m] = R.etfs[code].me[prevMonth(m)]; log(`    ${code} ${m} 整個月沒有成交，月底價沿用上月底`); }
+      else warn(`${code} ${m} 整個月沒有成交，也沒有上月底價，留白`);
     } catch (err) { warn(`${code} ${m} 個別補月底價失敗：${err.message}`); }
   }
   if (gaps.length > MAX_GAP_FILL_PER_RUN) warn(`${label} ${m} 有 ${gaps.length} 檔月底沒有收盤價，超過單次上限，只補了前 ${MAX_GAP_FILL_PER_RUN} 檔`);
   return newcomers;
+}
+
+// 單月報酬超出範圍時，抓該月逐日收盤看有沒有「像分割」的單日跳動。
+// 沒有 → 記在 R.verified，網頁照常顯示數字；有 → 記在 S.suspect，網頁維持「待確認」並警告。
+async function verifyOutliers(R, S, budget) {
+  R.verified ||= {};
+  S.suspect ||= {};
+  const splitsBy = {};
+  for (const sp of R.splits) (splitsBy[sp.code] ||= []).push(sp);
+  let used = 0;
+  for (const [code, e] of Object.entries(R.etfs)) {
+    const mk = marketKeyOf(e);
+    for (const m of Object.keys(e.me).sort()) {
+      if (m <= BASELINE_MONTH) continue;
+      const endDate = R.months[m]?.[mk]?.date;
+      if (!endDate) continue;
+      let base;
+      let baseDate;
+      if (e.listed && monthKey(e.listed) === m) { if (e.listClose == null) continue; base = e.listClose; baseDate = e.listed; }
+      else { const pm = prevMonth(m); base = e.me[pm]; baseDate = R.months[pm]?.[mk]?.date; if (base == null || !baseDate) continue; }
+      const splits = (splitsBy[code] || []).filter((sp) => sp.date > baseDate && sp.date <= endDate);
+      let adj = base;
+      for (const sp of splits) adj /= sp.ratio;
+      const r = e.me[m] / adj - 1;
+      if (r > CHECK_LOW && r < CHECK_HIGH) continue;
+      const key = `${code}|${m}`;
+      if ((R.verified[code] || []).includes(m) || S.suspect[key]) continue;
+      if (used >= budget) { log(`  大漲跌確認已達本次上限，其餘下一班再做`); return; }
+      used++;
+      try {
+        const rows = (await fetchMonth(mk, code, m)).filter((x) => x.date > baseDate && x.date <= endDate);
+        let prev = base;
+        let prevDate = baseDate;
+        let jump = null;
+        for (const x of rows) {
+          let p = prev;
+          for (const sp of splits) if (sp.date > prevDate && sp.date <= x.date) p /= sp.ratio;
+          const q = x.close / p;
+          if (q >= JUMP_UP || q <= JUMP_DOWN) { jump = `${prevDate} ${prev} → ${x.date} ${x.close}`; break; }
+          prev = x.close;
+          prevDate = x.date;
+        }
+        if (jump) {
+          S.suspect[key] = true;
+          warn(`${code} ${e.name} ${m} 單月 ${(r * 100).toFixed(1)}%，逐日看到單日跳動 ${jump}，疑似未公告的分割，網頁維持「待確認」`);
+        } else {
+          (R.verified[code] ||= []).push(m);
+          log(`  ${code} ${e.name} ${m} 單月 ${(r * 100).toFixed(1)}%：逐日確認是真實漲跌（沒有像分割的單日跳動），網頁照常顯示`);
+        }
+      } catch (err) {
+        warn(`${code} ${m} 大漲跌確認失敗，下一班再試：${err.message}`);
+      }
+    }
+  }
 }
 
 function lastMonthEndDate(R, e, market) {
@@ -715,12 +795,12 @@ function markDelisted(R, market) {
   if (!latest) return;
   for (const [code, e] of Object.entries(R.etfs)) {
     if (marketKeyOf(e) !== market || e.delisted) continue;
-    const lastDate = e.last?.date || e.delistedHint || lastMonthEndDate(R, e, market);
+    const lastDate = e.seen || e.last?.date || e.delistedHint || lastMonthEndDate(R, e, market);
     if (!lastDate) continue;
     if (weekdaysBetween(lastDate, latest) > DELIST_AFTER_WEEKDAYS) {
       e.delisted = lastDate;
       delete e.delistedHint;
-      log(`  ${code} ${e.name}：最後一次看到收盤是 ${lastDate}，標為已下市`);
+      log(`  ${code} ${e.name}：最後一次出現在名單上是 ${lastDate}，標為已下市`);
     }
   }
 }
@@ -787,12 +867,17 @@ function applyClassification(R, S) {
       const order = ['高股息', '大型權值'];
       e.themes = [...(byTheme[code] || [])].sort((a, b) => order.indexOf(a) - order.indexOf(b));
       e.themeByName = false;
-      if (domestic) { e.region = domestic.has(code) ? '國內' : '海外'; e.regionByName = false; }
+      // 官方「國內成分」清單不含槓桿／反向，所以不在清單上的再看名稱（例如 00631L 元大台灣50正2）
+      if (domestic) {
+        if (domestic.has(code)) { e.region = '國內'; e.regionByName = false; }
+        else if (/台灣|臺灣|台股|臺股/.test(e.name)) { e.region = '國內'; e.regionByName = true; }
+        else { e.region = '海外'; e.regionByName = false; }
+      }
     } else {
       const named = (e.type === '股票型' || e.type === '主動式') && /高股息|高息/.test(e.name);
       e.themes = named ? ['高股息'] : [];
       e.themeByName = named;
-      e.region = /台灣|臺灣|台股|臺股/.test(e.name) ? '國內' : '海外';
+      e.region = /台灣|臺灣|台股|臺股|上櫃|富櫃/.test(e.name) ? '國內' : '海外';
       e.regionByName = true;
     }
   }
@@ -869,8 +954,10 @@ async function main() {
   log(`etf-monthly 抓取程式，模式 ${MODE}，台北時間 ${taipeiNowIso()}`);
   if (MODE === 'probe') return probe();
 
-  const R = await readJson(RETURNS_PATH, emptyReturns());
-  const S = await readJson(STATE_PATH, emptyState());
+  const rebuild = MODE === 'rebuild';
+  if (rebuild) log('rebuild 模式：不讀現有資料，從頭補抓');
+  const R = rebuild ? emptyReturns() : await readJson(RETURNS_PATH, emptyReturns());
+  const S = rebuild ? emptyState() : await readJson(STATE_PATH, emptyState());
   S.buffer ||= { twse: {}, tpex: {} };
   S.pending ||= {};
   S.themeMembers ||= {};
@@ -951,6 +1038,16 @@ async function main() {
     log(`${MARKETS[market]}新掛牌 ${todo.length} 檔：${todo.map((x) => x.code).join('、')}`);
     for (const x of todo.slice(0, MAX_NEW_PER_RUN)) await resolveListing(R, market, x.code, x.month, x.fallback, true);
   }
+
+  // 5.5 補洞：還在掛牌、但某個已凍結月份沒有月底價的（冷門 ETF 月底沒成交、停牌）
+  for (const market of ['twse', 'tpex']) {
+    if (!S.backfill[market]) continue;
+    const frozen = monthsFromTo(BASELINE_MONTH, prevMonth(monthKey(today))).filter((m) => R.months[m]?.[market]?.date);
+    await fillGaps(R, market, frozen, MAX_GAP_FILL_PER_RUN);
+  }
+
+  // 5.6 大漲跌確認：單月超出 −40%～+100% 的，逐日檢查是真實行情還是漏掉的分割
+  await verifyOutliers(R, S, MAX_VERIFY_PER_RUN);
 
   // 6. 下市判斷
   for (const market of ['twse', 'tpex']) markDelisted(R, market);
