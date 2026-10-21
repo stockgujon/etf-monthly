@@ -37,7 +37,7 @@ const MAX_NEW_PER_RUN = 25;                 // 單次最多查幾檔新掛牌的
 const MAX_GAP_FILL_PER_RUN = 15;            // 單次最多補幾檔個別月底價
 const RWD_GAP_MS = Number(process.env.RWD_GAP_MS ?? 1500);
 const RETRY_DELAYS_MS = (process.env.RETRY_DELAYS_MS ?? '2000,6000,15000').split(',').map(Number);
-const FETCH_TIMEOUT_MS = Number(process.env.FETCH_TIMEOUT_MS ?? 30000);
+const FETCH_TIMEOUT_MS = Number(process.env.FETCH_TIMEOUT_MS ?? 45000);
 
 const THEME_TAGS = [
   { id: 'ff808081899b8efc0189aa050440001c', label: '高股息', theme: '高股息' },
@@ -142,10 +142,10 @@ async function pace() {
 function hostOf(url) { try { return new URL(url).host; } catch { return url; } }
 function twseUrls(p) { return [`https://www.twse.com.tw${p}`, `https://wwwc.twse.com.tw${p}`]; }
 
-async function getJson(label, urls, { headers = {}, method = 'GET', body, validate } = {}) {
+async function getJson(label, urls, { headers = {}, method = 'GET', body, validate, retryDelays = RETRY_DELAYS_MS } = {}) {
   const problems = [];
-  for (let round = 0; round <= RETRY_DELAYS_MS.length; round++) {
-    if (round > 0) await sleep(RETRY_DELAYS_MS[round - 1]);
+  for (let round = 0; round <= retryDelays.length; round++) {
+    if (round > 0) await sleep(retryDelays[round - 1]);
     for (const url of urls) {
       await pace();
       requestCount++;
@@ -216,11 +216,24 @@ async function fetchTwseDaily() {
   return snapshotFromRows(rows, { code: (r) => r.Code, name: (r) => r.Name, close: (r) => r.ClosingPrice, date: (r) => rocCompactToIso(r.Date) }, '上市每日收盤');
 }
 async function fetchTpexDaily() {
-  const rows = await getJson('上櫃每日收盤（OpenAPI）', ['https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes'], {
-    headers: H_TPEX,
-    validate: (j) => (Array.isArray(j) && j.length ? null : '不是非空陣列'),
-  });
-  return snapshotFromRows(rows, { code: (r) => r.SecuritiesCompanyCode, name: (r) => r.CompanyName, close: (r) => r.Close, date: (r) => rocCompactToIso(r.Date) }, '上櫃每日收盤');
+  try {
+    const rows = await getJson('上櫃每日收盤（OpenAPI）', ['https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes'], {
+      headers: H_TPEX,
+      retryDelays: RETRY_DELAYS_MS.slice(0, 1), // 有備援，不必等太久
+      validate: (j) => (Array.isArray(j) && j.length ? null : '不是非空陣列'),
+    });
+    return snapshotFromRows(rows, { code: (r) => r.SecuritiesCompanyCode, name: (r) => r.CompanyName, close: (r) => r.Close, date: (r) => rocCompactToIso(r.Date) }, '上櫃每日收盤');
+  } catch (err) {
+    // 備援：櫃買「上櫃股票每日收盤行情」（2026-10-21 probe 實測：OpenAPI 逾時，這支正常）
+    warn(`${err.message}；改用櫃買每日收盤行情頁面`);
+    const today = taipeiToday();
+    for (let i = 0, d = today; i < 7; i++, d = addDays(d, -1)) {
+      if (isWeekend(d)) continue;
+      const snap = await fetchTpexDay(d, { strictDate: false });
+      if (!snap.empty && Object.keys(snap.prices).length) { log(`上櫃每日收盤改由備援取得：${snap.date}`); return snap; }
+    }
+    throw new Error('上櫃每日收盤：OpenAPI 與備援都沒有資料');
+  }
 }
 
 // 歷史某一天：上市 MI_INDEX（只取 ETF 表）
@@ -254,7 +267,8 @@ async function fetchTwseDay(iso) {
 }
 
 // 歷史某一天：上櫃（端點未經實測，第一次請先跑 probe）
-async function fetchTpexDay(iso) {
+// strictDate=false：不要求回應日期等於查詢日，改用回應自己標的日期（每日備援用）
+async function fetchTpexDay(iso, { strictDate = true } = {}) {
   const [y, m, d] = iso.split('-');
   const j = await getJson(`上櫃 ${iso} 收盤`, [`https://www.tpex.org.tw/www/zh-tw/afterTrading/otc?date=${y}/${m}/${d}&type=EW&response=json`], {
     headers: H_TPEX,
@@ -264,13 +278,15 @@ async function fetchTpexDay(iso) {
       if (!statIsOk(x.stat)) return `stat=${x.stat}`;
       const t = findTable(x, ['代號', '收盤']);
       if (!t) return x.tables ? `找不到含「代號」「收盤」的表（欄位：${JSON.stringify((x.tables[0] || {}).fields || [])}）` : `沒有 tables（鍵：${Object.keys(x).join(',')}）`;
-      const rd = anyDateToIso(t.date) || rocTitleToIso(t.title);
-      if (rd && t.data.length && rd !== iso) return `回應的日期是 ${rd}，不是 ${iso}（可能讀到快取）`;
+      const rd = anyDateToIso(t.date) || rocTitleToIso(t.title) || anyDateToIso(x.date);
+      if (strictDate && rd && t.data.length && rd !== iso) return `回應的日期是 ${rd}，不是 ${iso}（可能讀到快取）`;
       return null;
     },
   });
   const t = findTable(j, ['代號', '名稱', '收盤']);
   if (statIsEmpty(j.stat) || !t || !t.data.length) return { date: iso, prices: {}, names: {}, empty: true };
+  const reported = anyDateToIso(t.date) || rocTitleToIso(t.title) || anyDateToIso(j.date);
+  if (!strictDate && !reported) return { date: iso, prices: {}, names: {}, empty: true };
   const prices = {};
   const names = {};
   for (const row of t.data) {
@@ -280,7 +296,7 @@ async function fetchTpexDay(iso) {
     const close = toPrice(row[t.idx[2]]);
     if (close != null) prices[code] = close;
   }
-  return { date: iso, prices, names, empty: Object.keys(names).length === 0 };
+  return { date: strictDate ? iso : reported, prices, names, empty: Object.keys(names).length === 0 };
 }
 
 // 單一 ETF 某個月的逐日收盤（用來找掛牌首日、補個別月底價）
@@ -777,7 +793,7 @@ async function probe() {
     const s = await findMonthEnd('twse', pm);
     log(s ? `月底 ${s.date}，${Object.keys(s.prices).length} 檔；0050=${s.prices['0050']}，0056=${s.prices['0056']}` : '整個月找不到資料');
   });
-  await step(`上櫃 ${pm} 月底（www/zh-tw/afterTrading/otc，未經實測）`, async () => {
+  await step(`上櫃 ${pm} 月底（www/zh-tw/afterTrading/otc）`, async () => {
     const d = lastWeekdayOfMonth(pm);
     const [y, m, dd] = d.split('-');
     const raw = await getJson('上櫃歷史原始回應', [`https://www.tpex.org.tw/www/zh-tw/afterTrading/otc?date=${y}/${m}/${dd}&type=EW&response=json`], { headers: H_TPEX });
@@ -794,8 +810,8 @@ async function probe() {
     const rows = await fetchTwseMonth('00981A', '2025-05');
     log(`${rows.length} 個交易日；第一天 ${JSON.stringify(rows[0])}`);
   });
-  await step(`上櫃單檔月資料（${tpexSample || '?'} ${pm}，未經實測）`, async () => {
-    if (!tpexSample) throw new Error('沒有上櫃代號可測');
+  await step(`上櫃單檔月資料（${tpexSample || '00679B'} ${pm}）`, async () => {
+    tpexSample ||= '00679B';
     const [y, mo] = pm.split('-');
     const raw = await getJson('上櫃單檔原始回應', [`https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock?code=${tpexSample}&date=${y}/${mo}/01&response=json`], { headers: H_TPEX });
     log(`原始回應鍵：${Object.keys(raw).join(',')}；stat=${raw.stat}`);
