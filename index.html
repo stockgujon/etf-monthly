@@ -134,7 +134,7 @@ footer .b { font-size: 12px; color: #d9cfb6; margin-top: 6px; }
       <div class="sw"><i style="background:var(--up0)"></i>&nbsp;</div><div class="sw"><i style="background:var(--up1)"></i>+1%</div><div class="sw"><i style="background:var(--up2)"></i>+3%</div><div class="sw"><i style="background:var(--up3)"></i>+6%</div>
     </div>
     <div class="lg"><span class="badge">掛牌月</span>從掛牌首日收盤價起算</div>
-    <div class="lg"><span class="warn" style="color:var(--ochre-ink);font-weight:700">⚠ 待確認</span>單月 −40% 以下或 +100% 以上，多半是分割，暫不顯示數字</div>
+    <div class="lg"><span class="warn" style="color:var(--ochre-ink);font-weight:700">⚠ 待確認</span>單月 −40% 以下或 +100% 以上、還沒逐日確認是真實行情，暫不顯示數字</div>
     <div class="lg">—　尚未掛牌或已下市</div>
   </div>
 </div>
@@ -199,6 +199,12 @@ footer .b { font-size: 12px; color: #d9cfb6; margin-top: 6px; }
     if (st && st.missing) return { status: 'missing' };
     if (st && st.pending) return { status: 'pending' };
     if (e.last && monthKey(e.last.date) === m) return { close: e.last.close, date: e.last.date, open: true };
+    // 還在掛牌但本月還沒有成交：價格沒變（用最近一次成交或上月底）
+    if (!e.delisted && e.seen && monthKey(e.seen) === m) {
+      var pm = prevMonth(m), pst = (D.months[pm] || {})[mk(e)];
+      var ref = e.last && e.last.date < m ? e.last.close : (pst && pst.date ? e.me[pm] : null);
+      if (ref != null) return { close: ref, date: e.seen, open: true, stale: true };
+    }
     return null;
   }
   function baseOf(e, m) {
@@ -220,8 +226,10 @@ footer .b { font-size: 12px; color: #d9cfb6; margin-top: 6px; }
     if (b.listing && en.date === b.date) return { kind: 'listblank' };
     var base = splitAdjust(code, b.close, b.date, en.date);
     var v = en.close / base - 1;
-    if (v <= CHECK_LOW || v >= CHECK_HIGH) return { kind: 'check', listing: !!b.listing };
-    return { kind: 'ok', v: v, listing: !!b.listing, open: !!en.open, endDate: en.date };
+    var big = v <= CHECK_LOW || v >= CHECK_HIGH;
+    var verified = big && ((D.verified || {})[code] || []).indexOf(m) >= 0;
+    if (big && !verified) return { kind: 'check', listing: !!b.listing };
+    return { kind: 'ok', v: v, listing: !!b.listing, open: !!en.open, endDate: en.date, verified: verified, stale: !!en.stale };
   }
   function yearReturn(code, e, y, monthsInYear, cells) {
     // 終點：這一年裡最晚的一個價格（凍結的月底，或最新收盤）
@@ -339,7 +347,11 @@ footer .b { font-size: 12px; color: #d9cfb6; margin-top: 6px; }
   }
   function cellHtml(c) {
     var badge = c.listing || c.kind === 'listblank' ? '<span class="badge">掛牌月</span>' : '';
-    if (c.kind === 'ok') return '<div class="cell"><div style="' + heat(c.v) + '"><span>' + fmtPct(c.v) + '</span>' + badge + '</div></div>';
+    if (c.kind === 'ok') {
+      var tip = c.verified ? ' title="漲跌超過一般範圍，已逐日確認是真實行情（不是分割）"' : (c.stale ? ' title="本月尚無成交，價格沿用前一次成交"' : '');
+      var mark = c.verified ? '<span class="note" style="font-size:10px">已逐日確認</span>' : '';
+      return '<div class="cell"><div style="' + heat(c.v) + '"' + tip + '><span>' + fmtPct(c.v) + '</span>' + badge + mark + '</div></div>';
+    }
     if (c.kind === 'check') return '<div class="cell"><div title="單月 −40% 以下或 +100% 以上，多半是分割或資料問題"><span class="warn">⚠ 待確認</span>' + badge + '</div></div>';
     if (c.kind === 'pending') return '<div class="cell"><div><span class="note">補抓中</span></div></div>';
     if (c.kind === 'missing') return '<div class="cell"><div><span class="note">缺資料</span></div></div>';
@@ -435,6 +447,7 @@ footer .b { font-size: 12px; color: #d9cfb6; margin-top: 6px; }
     r.cells.forEach(function (c, i) {
       var mm = (i + 1) + '月';
       if (c.kind === 'check') n.push(mm + '待確認（單月 −40% 以下或 +100% 以上）');
+      if (c.kind === 'ok' && c.verified) n.push(mm + '漲跌超過一般範圍，已逐日確認是真實行情');
       if (c.kind === 'pending') n.push(mm + '月底價補抓中');
       if (c.kind === 'missing') n.push(mm + '缺資料');
       if (c.kind === 'ok' && c.open) n.push(mm + '進行中，截至 ' + c.endDate.replace(/-/g, '/'));
