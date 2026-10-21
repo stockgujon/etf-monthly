@@ -1,0 +1,482 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex">
+<meta name="googlebot" content="noindex, nofollow">
+<title>國內ETF月報酬</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@700&display=swap">
+<style>
+:root {
+  --paper: #f7f2e6; --card: #fffdf6; --ink: #2f2b21; --muted: #6b6250; --faint: #8a826f;
+  --line: #e2dac6; --line-soft: #efe8d6; --ochre: #9a6f1e; --ochre-ink: #7a5612; --gold-soft: #f3e3b5; --gold-ink: #5a4210;
+  --deep: #443c2c; --head: #f1e9d6; --ytd: #faf5e8; --ytd-head: #ebe0c6; --tag: #f3ecdc; --tag-line: #e6dcc3; --tag-ink: #6b5a33;
+  --up-ink: #a33a22; --dn-ink: #4a6327;
+  --namew: 220px; --colw: 76px; --ytdw: 112px;
+  --up0: #f8ebe4; --up1: #f1d3c5; --up2: #e7b39e; --up3: #da8e74;
+  --dn0: #eef0e2; --dn1: #dde4c6; --dn2: #c6d2a3; --dn3: #acbd81;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink); font-family: 'Noto Sans TC', system-ui, -apple-system, 'PingFang TC', 'Microsoft JhengHei', sans-serif; font-variant-numeric: tabular-nums; }
+button, input { font-family: inherit; }
+.wrap { max-width: 1320px; margin: 0 auto; padding: 28px 16px 0; display: flex; flex-direction: column; gap: 18px; }
+.top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 16px; }
+.kicker { font-size: 13px; color: var(--ochre); font-weight: 700; letter-spacing: .08em; }
+h1 { margin: 6px 0; font-family: 'Noto Serif TC', serif; font-size: 34px; font-weight: 700; }
+.lede { margin: 0; font-size: 14px; color: var(--muted); }
+.status { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 16px; font-size: 13px; }
+.status .k { color: var(--muted); }
+.status .rows { display: flex; flex-direction: column; gap: 4px; }
+.btn { min-height: 44px; padding: 0 18px; border-radius: 10px; border: 1px solid var(--ochre); background: var(--card); color: var(--ochre-ink); font-size: 14px; font-weight: 500; cursor: pointer; }
+.btn:hover { background: #f6eedb; }
+.btn.primary { background: var(--ochre); color: #fffdf6; display: inline-flex; align-items: center; gap: 8px; }
+.btn.primary:hover { background: #87611a; }
+.btn:disabled { opacity: .6; cursor: wait; }
+.notice { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 16px; font-size: 13px; color: var(--muted); line-height: 1.7; }
+.notice b { color: var(--ink); }
+.filters { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.frow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.flabel { width: 44px; font-size: 13px; color: var(--muted); font-weight: 700; flex: none; }
+.chip { min-height: 44px; padding: 0 16px; border-radius: 999px; border: 1px solid var(--line); background: var(--card); color: var(--ink); font-size: 14px; cursor: pointer; }
+.chip:hover { border-color: #cbbf9f; }
+.chip[aria-pressed="true"] { background: var(--deep); border-color: var(--deep); color: #fffdf6; }
+.search { border-top: 1px dashed var(--line); padding-top: 12px; }
+.search input { flex: 1 1 220px; max-width: 360px; min-height: 44px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); font-size: 14px; }
+.bar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 12px; border-bottom: 1px solid var(--line); }
+.tabs { display: flex; gap: 4px; }
+.tab { min-height: 44px; padding: 0 16px; border: 0; border-bottom: 3px solid transparent; background: transparent; color: var(--muted); font-size: 15px; font-weight: 500; cursor: pointer; }
+.tab[aria-selected="true"] { border-bottom-color: var(--ochre); color: var(--ink); font-weight: 700; }
+.barright { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding-bottom: 8px; }
+.count { font-size: 13px; color: var(--muted); }
+.tablebox { background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow-x: auto; }
+.grid { display: grid; }
+.hrow { background: var(--head); border-bottom: 1px solid var(--line); font-size: 13px; }
+.drow { border-bottom: 1px solid var(--line-soft); }
+.drow:last-child { border-bottom: 0; }
+.namecell { position: sticky; left: 0; z-index: 1; background: var(--card); padding: 8px 14px; border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; justify-content: center; min-width: 0; }
+.hrow .namecell { background: var(--head); font-weight: 700; padding: 12px 14px; }
+.nm { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.nm .code { font-weight: 700; font-size: 15px; }
+.nm .name { font-size: 13px; color: var(--deep); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.tag { font-size: 11px; color: var(--tag-ink); background: var(--tag); border: 1px solid var(--tag-line); border-radius: 4px; padding: 0 5px; line-height: 18px; }
+.tag.off { color: #fffdf6; background: #8a826f; border-color: #8a826f; }
+.hcell { min-height: 48px; border: 0; background: transparent; color: var(--ink); font-size: 13px; font-weight: 700; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 4px 2px; }
+.hcell:hover { background: #ebe1c9; }
+.hcell .sub { font-size: 11px; font-weight: 500; color: var(--ochre-ink); }
+.hcell.ytd { border-left: 1px solid var(--line); background: var(--ytd-head); }
+.cell { padding: 3px; display: flex; }
+.cell > div { flex: 1; border-radius: 6px; font-size: 13px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; min-height: 40px; }
+.cell .note { font-size: 12px; color: var(--faint); }
+.cell .warn { font-size: 12px; color: var(--ochre-ink); font-weight: 700; }
+.badge { font-size: 10px; color: var(--gold-ink); background: var(--gold-soft); border-radius: 3px; padding: 0 4px; line-height: 15px; }
+.ytdcell { border-left: 1px solid var(--line); background: var(--ytd); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; padding: 4px; }
+.ytdcell .v { font-size: 15px; font-weight: 700; }
+.ytdcell .s { font-size: 10px; color: var(--muted); }
+.up { color: var(--up-ink); } .dn { color: var(--dn-ink); } .na { color: var(--faint); }
+.empty, .msg { padding: 40px 16px; text-align: center; font-size: 14px; color: var(--muted); }
+.legend { display: flex; flex-wrap: wrap; align-items: center; gap: 18px; font-size: 12px; color: var(--muted); padding-bottom: 8px; }
+.swatches { display: flex; gap: 3px; }
+.sw { display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 11px; }
+.sw i { width: 40px; height: 16px; border-radius: 4px; border: 1px solid var(--line); display: block; }
+.lg { display: flex; align-items: center; gap: 6px; }
+footer { background: var(--deep); color: #f7f2e6; text-align: center; padding: 22px 16px; margin-top: 28px; }
+footer .a { font-size: 15px; font-weight: 500; }
+footer .b { font-size: 12px; color: #d9cfb6; margin-top: 6px; }
+@media (max-width: 640px) {
+  :root { --namew: 148px; --colw: 70px; --ytdw: 96px; }
+  h1 { font-size: 28px; } .namecell { padding: 8px 10px; } .nm { flex-direction: column; gap: 0; } .nm .name { max-width: 100%; }
+  .sw i { width: 30px; } .swatches { flex-wrap: wrap; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div>
+      <div class="kicker">上市＋上櫃　全部掛牌 ETF</div>
+      <h1>國內ETF月報酬</h1>
+      <p class="lede">每月單月報酬率＋今年以來報酬率，月份結束後凍結保存，跨年保留全年紀錄</p>
+    </div>
+    <div class="status">
+      <div class="rows">
+        <div><span class="k">官方資料日　</span><span id="asof">—</span></div>
+        <div><span class="k">最後成功更新　</span><span id="updated">—</span></div>
+      </div>
+      <button type="button" class="btn" id="reload">重新載入</button>
+    </div>
+  </div>
+
+  <div class="notice">報酬率只計算價差，<b>不含配息</b>。高股息 ETF 在除息的月份，數字會看起來偏低。當月為進行中，每天收盤後更新；月份結束後即凍結。分割已依證交所公告換算。</div>
+
+  <div class="filters" id="filters"></div>
+
+  <div class="bar">
+    <div class="tabs" role="tablist" id="tabs"></div>
+    <div class="barright">
+      <div class="count" id="count"></div>
+      <button type="button" class="btn primary" id="xlsx">
+        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 19h16"/></svg>
+        <span>下載 Excel</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="tablebox" id="table"><div class="msg">讀取中…</div></div>
+
+  <div class="legend">
+    <div class="swatches" aria-hidden="true">
+      <div class="sw"><i style="background:var(--dn3)"></i>−6%</div><div class="sw"><i style="background:var(--dn2)"></i>−3%</div><div class="sw"><i style="background:var(--dn1)"></i>−1%</div><div class="sw"><i style="background:var(--dn0)"></i>&nbsp;</div>
+      <div class="sw"><i style="background:var(--card)"></i>0</div>
+      <div class="sw"><i style="background:var(--up0)"></i>&nbsp;</div><div class="sw"><i style="background:var(--up1)"></i>+1%</div><div class="sw"><i style="background:var(--up2)"></i>+3%</div><div class="sw"><i style="background:var(--up3)"></i>+6%</div>
+    </div>
+    <div class="lg"><span class="badge">掛牌月</span>從掛牌首日收盤價起算</div>
+    <div class="lg"><span class="warn" style="color:var(--ochre-ink);font-weight:700">⚠ 待確認</span>單月 −40% 以下或 +100% 以上，多半是分割，暫不顯示數字</div>
+    <div class="lg">—　尚未掛牌或已下市</div>
+  </div>
+</div>
+
+<footer>
+  <div class="a">僅為個人用途，不做任何商業利益行為</div>
+  <div class="b">網頁製作：股匠理財部落</div>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+  // ---------- 資料位置：GitHub Pages 上直接讀 raw（Pages 不會為機器人的 commit 重建） ----------
+  var DATA_URL = (function () {
+    var m = location.hostname.match(/^([^.]+)\.github\.io$/);
+    var repo = location.pathname.split('/').filter(Boolean)[0];
+    if (m && repo) return 'https://raw.githubusercontent.com/' + m[1] + '/' + repo + '/main/data/returns.json';
+    return './data/returns.json';
+  })();
+  var XLSX_URL = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+  var CHECK_LOW = -0.4, CHECK_HIGH = 1.0;
+  var TYPES = ['股票型', '主動式', '債券', '槓桿', '反向', '期貨', '多資產'];
+  var THEMES = ['高股息', '大型權值'];
+
+  var D = null;           // returns.json
+  var MODEL = null;       // 計算後的年度資料
+  var state = { market: '全部', type: '全部', theme: '全部', region: '全部', q: '', year: null, sortKey: 'yr', sortDir: -1 };
+  try { var saved = JSON.parse(localStorage.getItem('etfm-filters') || 'null'); if (saved) Object.assign(state, saved, { year: null }); } catch (e) {}
+
+  // ---------- 小工具 ----------
+  function $(id) { return document.getElementById(id); }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function pad(n) { return String(n).padStart(2, '0'); }
+  function mk(e) { return e.market === '上市' ? 'twse' : 'tpex'; }
+  function monthKey(iso) { return iso ? iso.slice(0, 7) : null; }
+  function prevMonth(m) { var y = +m.slice(0, 4), mo = +m.slice(5, 7); return mo === 1 ? (y - 1) + '-12' : y + '-' + pad(mo - 1); }
+  function fmtPct(v) { if (v == null) return '—'; if (Math.abs(v) < 0.00005) return '0.00%'; return (v > 0 ? '+' : '−') + Math.abs(v * 100).toFixed(2) + '%'; }
+  function heat(v) {
+    if (v == null) return '';
+    var a = Math.abs(v * 100);
+    if (a < 0.005) return '';
+    var lv = a < 1 ? 0 : a < 3 ? 1 : a < 6 ? 2 : 3;
+    return 'background:var(--' + (v > 0 ? 'up' : 'dn') + lv + ')';
+  }
+  function shortDate(iso) { return iso ? iso.slice(5).replace('-', '/') : ''; }
+  function fmtUpdated(s) { if (!s) return '—'; return s.slice(0, 16).replace('T', ' '); }
+
+  // ---------- 報酬計算 ----------
+  function splitAdjust(code, base, fromDate, toDate) {
+    var list = (D.splitsBy[code] || []);
+    for (var i = 0; i < list.length; i++) if (list[i].date > fromDate && list[i].date <= toDate) base = base / list[i].ratio;
+    return base;
+  }
+  function endOf(e, m) {
+    var st = (D.months[m] || {})[mk(e)];
+    if (st && st.date) {
+      var c = e.me[m];
+      if (c != null) return { close: c, date: st.date };
+      if (e.delisted && e.delisted <= st.date) return null;
+      return { gone: true };
+    }
+    if (st && st.missing) return { status: 'missing' };
+    if (st && st.pending) return { status: 'pending' };
+    if (e.last && monthKey(e.last.date) === m) return { close: e.last.close, date: e.last.date, open: true };
+    return null;
+  }
+  function baseOf(e, m) {
+    if (e.listed && monthKey(e.listed) === m) return e.listClose != null ? { close: e.listClose, date: e.listed, listing: true } : { unknownListing: true };
+    var pm = prevMonth(m);
+    var st = (D.months[pm] || {})[mk(e)];
+    if (st && st.date && e.me[pm] != null) return { close: e.me[pm], date: st.date };
+    return null;
+  }
+  function monthReturn(code, e, m) {
+    if (e.listed && monthKey(e.listed) > m) return { kind: 'na' };
+    if (e.delisted && monthKey(e.delisted) < m) return { kind: 'na' };
+    var b = baseOf(e, m);
+    var en = endOf(e, m);
+    if (b && b.unknownListing) return { kind: 'listblank' };
+    if (en && en.status) return { kind: en.status };
+    if (!b || !en) return { kind: 'na' };
+    if (en.gone) return { kind: 'missing' };
+    if (b.listing && en.date === b.date) return { kind: 'listblank' };
+    var base = splitAdjust(code, b.close, b.date, en.date);
+    var v = en.close / base - 1;
+    if (v <= CHECK_LOW || v >= CHECK_HIGH) return { kind: 'check', listing: !!b.listing };
+    return { kind: 'ok', v: v, listing: !!b.listing, open: !!en.open, endDate: en.date };
+  }
+  function yearReturn(code, e, y, monthsInYear, cells) {
+    // 終點：這一年裡最晚的一個價格（凍結的月底，或最新收盤）
+    var end = null;
+    monthsInYear.forEach(function (m) {
+      var st = (D.months[m] || {})[mk(e)];
+      if (st && st.date && e.me[m] != null && (!end || st.date > end.date)) end = { close: e.me[m], date: st.date };
+    });
+    if (e.last && e.last.date.slice(0, 4) === String(y) && (!end || e.last.date > end.date)) end = { close: e.last.close, date: e.last.date };
+    if (!end) return null;
+    // 起點：去年底，或今年掛牌的掛牌首日
+    var base = null, since = false;
+    if (e.listed && e.listed.slice(0, 4) === String(y)) {
+      since = true;
+      if (e.listClose != null) base = { close: e.listClose, date: e.listed };
+      else {
+        var lm = monthKey(e.listed); var st2 = (D.months[lm] || {})[mk(e)];
+        if (st2 && st2.date && e.me[lm] != null) base = { close: e.me[lm], date: st2.date };
+      }
+    } else {
+      var pm = (y - 1) + '-12'; var st3 = (D.months[pm] || {})[mk(e)];
+      if (st3 && st3.date && e.me[pm] != null) base = { close: e.me[pm], date: st3.date };
+    }
+    if (!base || end.date <= base.date) return since ? { kind: 'na', since: true } : null;
+    for (var i = 0; i < cells.length; i++) if (cells[i].kind === 'check') return { kind: 'check', since: since };
+    return { kind: 'ok', v: end.close / splitAdjust(code, base.close, base.date, end.date) - 1, since: since, endDate: end.date };
+  }
+
+  function buildModel() {
+    D.splitsBy = {};
+    (D.splits || []).forEach(function (s) { (D.splitsBy[s.code] = D.splitsBy[s.code] || []).push(s); });
+    var frozen = Object.keys(D.months).filter(function (m) { var x = D.months[m]; return (x.twse && x.twse.date) || (x.tpex && x.tpex.date); }).sort();
+    var latestMonth = [monthKey(D.latest.twse), monthKey(D.latest.tpex), frozen[frozen.length - 1]].filter(Boolean).sort().pop();
+    var firstYear = +((D.baseline || '2024-12').slice(0, 4)) + 1;
+    var lastYear = +latestMonth.slice(0, 4);
+    var years = [];
+    for (var y = lastYear; y >= firstYear; y--) {
+      var lastM = y === lastYear ? +latestMonth.slice(5, 7) : 12;
+      var months = [];
+      for (var i = 1; i <= lastM; i++) months.push(y + '-' + pad(i));
+      var heads = months.map(function (m) {
+        var x = D.months[m] || {};
+        var sub = '';
+        if ((x.twse && x.twse.pending) || (x.tpex && x.tpex.pending)) sub = '補抓中';
+        else if ((x.twse && x.twse.missing) || (x.tpex && x.tpex.missing)) sub = '缺資料';
+        else if (!(x.twse && x.twse.date) && m === latestMonth) sub = '● 進行中';
+        return { key: m, label: (+m.slice(5)) + '月', sub: sub };
+      });
+      var rows = [];
+      Object.keys(D.etfs).forEach(function (code) {
+        var e = D.etfs[code];
+        var cells = months.map(function (m) { return monthReturn(code, e, m); });
+        var yr = yearReturn(code, e, y, months, cells);
+        var has = cells.some(function (c) { return c.kind !== 'na'; }) || (yr && yr.kind === 'ok');
+        if (!has) return;
+        rows.push({ code: code, e: e, cells: cells, yr: yr });
+      });
+      years.push({ year: y, current: y === lastYear, months: months, heads: heads, rows: rows });
+    }
+    MODEL = { years: years, latestMonth: latestMonth };
+    if (!state.year || !years.some(function (x) { return x.year === state.year; })) state.year = years.length ? years[0].year : null;
+  }
+
+  // ---------- 篩選與排序 ----------
+  function passes(r) {
+    var e = r.e;
+    if (state.market !== '全部' && e.market !== state.market) return false;
+    if (state.type !== '全部' && e.type !== state.type) return false;
+    if (state.theme !== '全部' && (e.themes || []).indexOf(state.theme) < 0) return false;
+    if (state.region !== '全部' && e.region !== state.region) return false;
+    var q = state.q.trim();
+    if (q && r.code.indexOf(q.toUpperCase()) < 0 && e.name.indexOf(q) < 0) return false;
+    return true;
+  }
+  function sortVal(r, Y) {
+    if (state.sortKey === 'yr') return r.yr && r.yr.kind === 'ok' ? r.yr.v : null;
+    var idx = +state.sortKey - 1;
+    var c = r.cells[idx];
+    return c && c.kind === 'ok' ? c.v : null;
+  }
+  function visibleRows(Y) {
+    var rows = Y.rows.filter(passes);
+    rows.sort(function (a, b) {
+      var x = sortVal(a, Y), y = sortVal(b, Y);
+      if (x == null && y == null) return a.code.localeCompare(b.code);
+      if (x == null) return 1;
+      if (y == null) return -1;
+      return (x - y) * state.sortDir;
+    });
+    return rows;
+  }
+
+  // ---------- 畫面 ----------
+  function renderFilters() {
+    var types = TYPES.slice();
+    Object.keys(D.etfs).forEach(function (c) { var t = D.etfs[c].type; if (types.indexOf(t) < 0) types.push(t); });
+    var groups = [
+      { key: 'market', label: '市場', opts: ['全部', '上市', '上櫃'] },
+      { key: 'type', label: '類型', opts: ['全部'].concat(types) },
+      { key: 'theme', label: '主題', opts: ['全部'].concat(THEMES) },
+      { key: 'region', label: '地區', opts: ['全部', '國內', '海外'] },
+    ];
+    var html = groups.map(function (g) {
+      return '<div class="frow" role="group" aria-label="' + g.label + '"><div class="flabel">' + g.label + '</div>' + g.opts.map(function (o) {
+        return '<button type="button" class="chip" data-k="' + g.key + '" data-v="' + esc(o) + '" aria-pressed="' + (state[g.key] === o) + '">' + esc(o) + '</button>';
+      }).join('') + '</div>';
+    }).join('');
+    html += '<label class="frow search"><span class="flabel">搜尋</span><input type="search" id="q" placeholder="代號或名稱，例如 0056" value="' + esc(state.q) + '"></label>';
+    $('filters').innerHTML = html;
+  }
+  function renderTabs() {
+    $('tabs').innerHTML = MODEL.years.map(function (Y) {
+      return '<button type="button" class="tab" role="tab" data-y="' + Y.year + '" aria-selected="' + (Y.year === state.year) + '">' + Y.year + (Y.current ? ' 今年' : ' 全年') + '</button>';
+    }).join('');
+  }
+  function cellHtml(c) {
+    var badge = c.listing || c.kind === 'listblank' ? '<span class="badge">掛牌月</span>' : '';
+    if (c.kind === 'ok') return '<div class="cell"><div style="' + heat(c.v) + '"><span>' + fmtPct(c.v) + '</span>' + badge + '</div></div>';
+    if (c.kind === 'check') return '<div class="cell"><div title="單月 −40% 以下或 +100% 以上，多半是分割或資料問題"><span class="warn">⚠ 待確認</span>' + badge + '</div></div>';
+    if (c.kind === 'pending') return '<div class="cell"><div><span class="note">補抓中</span></div></div>';
+    if (c.kind === 'missing') return '<div class="cell"><div><span class="note">缺資料</span></div></div>';
+    if (c.kind === 'listblank') return '<div class="cell"><div>' + badge + '</div></div>';
+    return '<div class="cell"><div><span class="na">—</span></div></div>';
+  }
+  function tagsOf(e) {
+    var t = [e.market, e.type];
+    if (e.sub) t.push(e.sub);
+    (e.themes || []).forEach(function (x) { t.push(e.themeByName ? x + '（依名稱）' : x); });
+    if (e.region) t.push(e.region);
+    return t;
+  }
+  function renderTable() {
+    var Y = MODEL.years.filter(function (x) { return x.year === state.year; })[0];
+    if (!Y) { $('table').innerHTML = '<div class="msg">還沒有資料</div>'; $('count').textContent = ''; return; }
+    var rows = visibleRows(Y);
+    var n = Y.months.length;
+    var cols = 'grid-template-columns:var(--namew) repeat(' + n + ',minmax(var(--colw),1fr)) minmax(var(--ytdw),1.2fr)';
+    var minW = 'calc(var(--namew) + ' + n + ' * var(--colw) + var(--ytdw))';
+    var arrow = function (k) { return state.sortKey === k ? (state.sortDir < 0 ? ' ▼' : ' ▲') : ''; };
+    var head = '<div class="grid hrow" style="' + cols + '"><div class="namecell">代號／名稱</div>' +
+      Y.heads.map(function (h, i) { return '<button type="button" class="hcell" data-sort="' + (i + 1) + '"><span>' + h.label + arrow(String(i + 1)) + '</span><span class="sub">' + h.sub + '</span></button>'; }).join('') +
+      '<button type="button" class="hcell ytd" data-sort="yr">' + (Y.current ? '今年以來' : Y.year + ' 全年') + arrow('yr') + '</button></div>';
+    var body = rows.map(function (r) {
+      var e = r.e;
+      var yr = r.yr;
+      var yv = yr && yr.kind === 'ok' ? '<span class="v ' + (yr.v > 0.00005 ? 'up' : yr.v < -0.00005 ? 'dn' : '') + '">' + fmtPct(yr.v) + '</span>' : (yr && yr.kind === 'check' ? '<span class="warn" style="font-size:13px">⚠ 待確認</span>' : '<span class="v na">—</span>');
+      var ys = yr && yr.since ? '<span class="s">掛牌以來</span>' : '';
+      var tags = tagsOf(e).map(function (t) { return '<span class="tag">' + esc(t) + '</span>'; }).join('') + (e.delisted ? '<span class="tag off">已下市</span>' : '');
+      return '<div class="grid drow" style="' + cols + '"><div class="namecell"><div class="nm"><span class="code">' + esc(r.code) + '</span><span class="name" title="' + esc(e.name) + '">' + esc(e.name) + '</span></div><div class="tags">' + tags + '</div></div>' +
+        r.cells.map(cellHtml).join('') + '<div class="ytdcell">' + yv + ys + '</div></div>';
+    }).join('');
+    $('table').innerHTML = '<div style="min-width:' + minW + '">' + head + (rows.length ? body : '<div class="empty">沒有符合條件的 ETF，換個篩選試試看</div>') + '</div>';
+    $('count').textContent = '顯示 ' + rows.length + ' 檔・' + Y.year + ' 年共 ' + Y.rows.length + ' 檔';
+  }
+  function renderStatus() {
+    $('asof').textContent = '上市 ' + (D.latest.twse || '—') + '・上櫃 ' + (D.latest.tpex || '—');
+    $('updated').textContent = fmtUpdated(D.updatedAt);
+  }
+  function renderAll() { renderFilters(); renderTabs(); renderTable(); }
+  function saveFilters() { try { localStorage.setItem('etfm-filters', JSON.stringify({ market: state.market, type: state.type, theme: state.theme, region: state.region })); } catch (e) {} }
+
+  // ---------- 事件 ----------
+  $('filters').addEventListener('click', function (ev) {
+    var b = ev.target.closest('.chip'); if (!b) return;
+    state[b.dataset.k] = b.dataset.v; saveFilters(); renderFilters(); renderTable();
+  });
+  $('filters').addEventListener('input', function (ev) { if (ev.target.id === 'q') { state.q = ev.target.value; renderTable(); } });
+  $('tabs').addEventListener('click', function (ev) {
+    var b = ev.target.closest('.tab'); if (!b) return;
+    state.year = +b.dataset.y;
+    if (state.sortKey !== 'yr') { var Y = MODEL.years.filter(function (x) { return x.year === state.year; })[0]; if (+state.sortKey > Y.months.length) state.sortKey = 'yr'; }
+    renderTabs(); renderTable();
+  });
+  $('table').addEventListener('click', function (ev) {
+    var b = ev.target.closest('.hcell'); if (!b) return;
+    var k = b.dataset.sort;
+    state.sortDir = state.sortKey === k ? -state.sortDir : -1;
+    state.sortKey = k; renderTable();
+  });
+  $('reload').addEventListener('click', function () { load(true); });
+  $('xlsx').addEventListener('click', downloadXlsx);
+
+  // ---------- 讀資料 ----------
+  function load(manual) {
+    var btn = $('reload'); btn.disabled = true;
+    fetch(DATA_URL + '?ts=' + Date.now(), { cache: 'no-store' })
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function (j) {
+        if (!j || !j.etfs || !j.months) throw new Error('資料格式不符');
+        D = j; buildModel(); renderStatus(); renderAll();
+      })
+      .catch(function (err) {
+        if (!D) $('table').innerHTML = '<div class="msg">讀不到資料（' + esc(err.message) + '）。如果網站剛建立，請等第一次排程跑完再重新載入。</div>';
+        else if (manual) alert('重新載入失敗：' + err.message);
+      })
+      .then(function () { btn.disabled = false; });
+  }
+
+  // ---------- Excel ----------
+  function loadScript(src) {
+    return new Promise(function (ok, no) {
+      if (window.XLSX) return ok();
+      var s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = function () { no(new Error('Excel 元件載入失敗')); };
+      document.head.appendChild(s);
+    });
+  }
+  function noteOf(r, Y) {
+    var e = r.e, n = [];
+    if (e.listed && +e.listed.slice(0, 4) === Y.year) n.push(e.listed.replace(/-/g, '/') + ' 掛牌' + (e.listClose == null ? '（首日價查不到，掛牌月不計）' : ''));
+    if (e.delisted) n.push(e.delisted.replace(/-/g, '/') + ' 後未再交易（已下市）');
+    r.cells.forEach(function (c, i) {
+      var mm = (i + 1) + '月';
+      if (c.kind === 'check') n.push(mm + '待確認（單月 −40% 以下或 +100% 以上）');
+      if (c.kind === 'pending') n.push(mm + '月底價補抓中');
+      if (c.kind === 'missing') n.push(mm + '缺資料');
+      if (c.kind === 'ok' && c.open) n.push(mm + '進行中，截至 ' + c.endDate.replace(/-/g, '/'));
+    });
+    if (e.themeByName) n.push('主題依名稱判斷');
+    return n.join('；');
+  }
+  function downloadXlsx() {
+    if (!MODEL) return;
+    var btn = $('xlsx'); btn.disabled = true;
+    loadScript(XLSX_URL).then(function () {
+      var wb = XLSX.utils.book_new();
+      MODEL.years.forEach(function (Y) {
+        var keep = state.sortKey;
+        if (keep !== 'yr' && +keep > Y.months.length) state.sortKey = 'yr';
+        var rows = visibleRows(Y);
+        state.sortKey = keep;
+        var header = ['代號', '名稱', '市場', '類型', '主題', '地區'].concat(Y.months.map(function (m) { return (+m.slice(5)) + '月'; }), [Y.current ? '今年以來' : Y.year + ' 全年', '備註']);
+        var aoa = [header];
+        rows.forEach(function (r) {
+          var e = r.e;
+          aoa.push([r.code, e.name, e.market, e.type + (e.sub ? '（' + e.sub + '）' : ''), (e.themes || []).join('、'), e.region || '']
+            .concat(r.cells.map(function (c) { return c.kind === 'ok' ? c.v : null; }), [r.yr && r.yr.kind === 'ok' ? r.yr.v : null, noteOf(r, Y)]));
+        });
+        var ws = XLSX.utils.aoa_to_sheet(aoa);
+        var range = XLSX.utils.decode_range(ws['!ref']);
+        for (var R = 1; R <= range.e.r; R++) for (var C = 6; C <= 6 + Y.months.length; C++) {
+          var cell = ws[XLSX.utils.encode_cell({ r: R, c: C })]; if (cell && typeof cell.v === 'number') cell.z = '0.00%';
+        }
+        ws['!cols'] = [{ wch: 9 }, { wch: 22 }, { wch: 6 }, { wch: 12 }, { wch: 14 }, { wch: 6 }].concat(Y.months.map(function () { return { wch: 9 }; }), [{ wch: 11 }, { wch: 40 }]);
+        ws['!autofilter'] = { ref: ws['!ref'] };
+        XLSX.utils.book_append_sheet(wb, ws, String(Y.year));
+      });
+      var parts = [state.market, state.type, state.theme, state.region].filter(function (x) { return x !== '全部'; });
+      var d = new Date();
+      var name = 'ETF月報酬_' + (parts.length ? parts.join('-') : '全部') + '_' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '.xlsx';
+      XLSX.writeFile(wb, name);
+    }).catch(function (err) { alert(err.message); }).then(function () { btn.disabled = false; });
+  }
+
+  load(false);
+})();
+</script>
+</body>
+</html>
